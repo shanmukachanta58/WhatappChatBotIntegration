@@ -8,5 +8,7 @@ public enum ConversationState {
     SELECT_DATE,
     SELECT_TIME,
     CONFIRMATION,
+    CANCELLATION,
+    CANCELLATION_CONFIRMATION,
     COMPLETED
 }

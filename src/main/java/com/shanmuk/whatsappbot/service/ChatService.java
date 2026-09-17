@@ -12,6 +12,8 @@ import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeParseException;
+import java.util.Optional;
+
 import com.shanmuk.whatsappbot.entity.Booking;
 import com.shanmuk.whatsappbot.repository.BookingRepository;
 
@@ -72,8 +74,10 @@ public class ChatService {
 
                 } else if (normalizedMessage.contains("cancel")) {
 
-                    reply = "Sure. I can help you cancel a booking. Please provide your booking details.";
+                    conversation.setCurrentState(ConversationState.CANCELLATION);
+                    conversation.setUpdatedAt(LocalDateTime.now());
 
+                    reply = "Sure. Let me check your booking.";
                 } else {
 
                     reply = "I'm sorry, I didn't understand that. You can ask me about bookings or cancellations.";
@@ -94,11 +98,78 @@ public class ChatService {
 
                 break;
 
+            case CANCELLATION:
+
+                Optional<Booking> cancellationBooking = bookingRepository.findByConversationAndStatus(conversation, "CONFIRMED");
+
+                if(cancellationBooking.isEmpty()) {
+                    reply = "You don't have any active booking to cancel.";
+
+                    conversation.setCurrentState(ConversationState.START);
+                    conversation.setUpdatedAt(LocalDateTime.now());
+                } else {
+
+                    Booking bookingToCancel = cancellationBooking.get();
+
+                    conversation.setCurrentState(ConversationState.CANCELLATION_CONFIRMATION);
+                    conversation.setUpdatedAt((LocalDateTime.now()));
+
+                    reply = "I found your booking for " + bookingToCancel.getService() + " on " + bookingToCancel.getBookingDate() + " at " + bookingToCancel.getBookingTime() + ". Do you want to cancel it? Reply YES or NO.";
+
+                    break;
+                }
+
+            case CANCELLATION_CONFIRMATION:
+
+                Optional<Booking> cancellationConfirmationBooking = bookingRepository.findByConversationAndStatus(conversation, "CONFIRMED");
+
+                if(cancellationConfirmationBooking.isEmpty()) {
+
+                    reply = "I couldn't find an active booking to cancel.";
+
+                    conversation.setCurrentState(ConversationState.START);
+                    conversation.setUpdatedAt(LocalDateTime.now());
+
+                    break;
+                }
+
+                Booking bookingToCancel = cancellationConfirmationBooking.get();
+
+                if(normalizedMessage.equals("yes")) {
+
+                    bookingToCancel.setStatus("CANCELLED");
+
+                    bookingRepository.save(bookingToCancel);
+
+                    conversation.setCurrentState(ConversationState.START);
+                    conversation.setUpdatedAt(LocalDateTime.now());
+
+                    reply = "Your booking has been cancelled successfully.";
+
+                } else if(normalizedMessage.equals("no")) {
+
+                    conversation.setCurrentState(ConversationState.COMPLETED);
+                    conversation.setUpdatedAt(LocalDateTime.now());
+
+                    reply = "Okay. Your booking has not been cancelled";
+
+                } else {
+
+                    reply = "Please reply YES to cancel your booking or NO to keep it.";
+                }
+
+                break;
+
             case SELECT_DATE:
 
                 try {
 
                     LocalDate bookingDate = LocalDate.parse(message.trim());
+
+                    if(bookingDate.isBefore(LocalDate.now())) {
+                        reply = "You cannot book a date in the past. Please choose a future date.";
+                        break;
+                    }
 
                     Booking pendingBooking = bookingRepository.findByConversationAndStatus(conversation, "PENDING").orElseThrow();
 
@@ -106,7 +177,7 @@ public class ChatService {
 
                     bookingRepository.save(pendingBooking);
 
-                    conversation.setCurrentState((ConversationState.SELECT_DATE));
+                    conversation.setCurrentState((ConversationState.SELECT_TIME));
                     conversation.setUpdatedAt(LocalDateTime.now());
 
                     reply = "Great! What time would you like to book?";
@@ -115,6 +186,7 @@ public class ChatService {
 
                     reply = "Please enter the date in this format: YYYY-MM-DD";
 
+                    break;
                 }
 
             case SELECT_TIME:
@@ -125,7 +197,21 @@ public class ChatService {
 
                     Booking timeBooking = bookingRepository.findByConversationAndStatus(conversation, "PENDING").orElseThrow();
 
+                    if(timeBooking.getBookingDate().isEqual(LocalDate.now()) && bookingTime.isBefore(LocalTime.now().withSecond(0).withNano(0))) {
+
+                        reply = "You cannot book a time that has already passed. Please choose another time.";
+                        break;
+                    }
+
                     timeBooking.setBookingTime(bookingTime);
+
+                    boolean slotTaken = bookingRepository.existsByBookingDateAndBookingTimeAndStatus(timeBooking.getBookingDate(), bookingTime, "CONFIRMED");
+
+                    if(slotTaken) {
+                        reply = "Sorry, that time is already booked. Please choose another time.";
+                        break;
+                    }
+                    bookingRepository.save(timeBooking);
 
                     conversation.setCurrentState(ConversationState.CONFIRMATION);
                     conversation.setUpdatedAt(LocalDateTime.now());
@@ -148,7 +234,7 @@ public class ChatService {
 
                     bookingRepository.save(confirmBooking);
 
-                    conversation.setCurrentState(ConversationState.COMPLETED);
+                    conversation.setCurrentState(ConversationState.START);
                     conversation.setUpdatedAt(LocalDateTime.now());
 
                     reply = "Your booking has been confirmed!";
