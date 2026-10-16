@@ -35,16 +35,6 @@ public class WebhookController {
         return "Verification failed";
     }
 
-    @GetMapping("/test-send")
-    public String testSend() {
-
-        whatsAppService.sendOrderConfirmation(
-                "919948049247"
-        );
-
-        return "Template message sent";
-    }
-
     @PostMapping
     public String receiveMessage(@RequestBody String payload) {
 
